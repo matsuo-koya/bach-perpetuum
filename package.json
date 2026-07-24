@@ -1,0 +1,21 @@
+{
+  "name": "bach-perpetuum",
+  "private": true,
+  "version": "1.0.0",
+  "type": "module",
+  "description": "無限バッハ機関 — 機能和声グラマーによる永久生成 + 撥弦物理モデル・チェンバロ / 倍音加算パイプオルガン + リアルタイム楽典解説",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview"
+  },
+  "dependencies": {
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1",
+    "tone": "^15.0.4"
+  },
+  "devDependencies": {
+    "@vitejs/plugin-react": "^4.3.4",
+    "vite": "^6.0.7"
+  }
+}
