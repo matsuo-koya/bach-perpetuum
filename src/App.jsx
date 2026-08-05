@@ -49,6 +49,8 @@ const TR_EN = {
   "副属七の連鎖": "Applied-dominant chain", "ドミナント": "Dominant", "半音階的ラメント・バス": "Chromatic lament bass",
   "ナポリの六": "Neapolitan sixth", "転回対位法": "Invertible counterpoint", "転回対位法(声部交換)": "Invertible counterpoint",
   "モルデント": "Mordent", "走句(第II鍵盤)": "Run (Manual II)", "エコー(鍵盤交替・第I鍵盤)": "Echo (Manual I)",
+  "プラルトリラー": "Inverted mordent", "回音(グルペット)": "Turn (gruppetto)", "オクターヴ上の主音から": "From the octave tonic",
+  "第3音からの開始": "Entry from the third", "同音反復の打鍵": "Repeated-note attack",
   "減七の分散和音": "Diminished-7th arpeggio", "オルゲルプンクト": "Pedal point", "フェルマータ": "Fermata",
   "逆オルゲルプンクト(上声保続)": "Inverted pedal point", "ゼクエンツ": "Sequence", "主題(ズビェクト)": "Subject",
   "属調の応答": "Answer at the fifth", "対唱": "Countersubject", "頭部動機のゼクエンツ": "Head-motif sequence",
@@ -413,9 +415,21 @@ function lineEv(events, pairs, root, scale, startOff, vel, ped, man) {
     off += d;
   });
 }
+/* トッカータ冒頭の頭部動機。第1周は BWV 565 の原型、以後は変奏に切り替わる。
+   deg=主音からの音度、fig=[頭部音からの音度, 長さ]。合計は必ず6単位(走句の開始位置を揃えるため) */
+const TOC_HEADS = [
+  { tech: "モルデント", deg: 4, fig: [[0, 1], [-1, 1], [0, 4]] }, // 原型:5̂-4̂-5̂
+  { tech: "プラルトリラー", deg: 4, fig: [[0, 1], [1, 1], [0, 4]] }, // 上方転回:5̂-6̂-5̂
+  { tech: "回音(グルペット)", deg: 4, fig: [[0, 1], [1, 1], [0, 1], [-1, 1], [0, 2]] },
+  { tech: "オクターヴ上の主音から", deg: 7, fig: [[0, 1], [-1, 1], [0, 4]] }, // 8̂-7̂-8̂
+  { tech: "第3音からの開始", deg: 2, fig: [[0, 2], [-1, 1], [0, 1], [1, 1], [0, 1]] },
+  { tech: "同音反復の打鍵", deg: 4, fig: [[0, 1], [0, 1], [-1, 1], [0, 3]] },
+];
 function buildToccataFugue(st) {
   if (st.key.mode === "major") st.key = { tonic: pcOf(st.key.tonic + 9), mode: "minor" }; // 平行短調へ
   st.tocCycle = st.tocCycle || 0;
+  // 第1周は本歌取り(原型)、2周目以降は頭部動機を変奏する
+  st.tocHead = st.tocCycle === 0 ? 0 : 1 + Math.floor(Math.random() * (TOC_HEADS.length - 1));
   let firstLog = null;
   if (st.tocCycle > 0) {
     st.key = { tonic: pcOf(st.key.tonic + 7), mode: "minor" };
@@ -440,23 +454,31 @@ function buildToccataFugue(st) {
   }
 
   const octT = nearestPcMidi(tn, 74);
-  const five = stepFrom(octT, 4, sH);
-  // T1 冒頭:モルデントと下行走句
+  const head = TOC_HEADS[st.tocHead];
+  const five = stepFrom(octT, head.deg, sH);
+  // 頭部動機を任意の起点音・強さ・鍵盤で並べる
+  const headEv = (ev, root, vel, man) => {
+    let o = 0;
+    head.fig.forEach(([s, d]) => { ev.push({ off: o, m: stepFrom(root, s, sH), d, v: vel, man }); o += d; });
+  };
+  // T1 冒頭:頭部動機と下行走句
   {
-    const ev = [{ off: 0, m: five, d: 1, v: 0.95, man: 2 }, { off: 1, m: stepFrom(five, -1, sH), d: 1, v: 0.95, man: 2 }, { off: 2, m: five, d: 4, v: 0.95, man: 2 }];
+    const ev = [];
+    headEv(ev, five, 0.95, 2);
     let r = stepFrom(five, -1, sN);
     const rl = 6 + Math.floor(Math.random() * 3);
     for (let i = 0; i < rl; i++) { ev.push({ off: 6 + i, m: r, d: 1, v: 0.9, man: 2 }); r = stepFrom(r, Math.random() < 0.85 ? -1 : -2, sN); }
-    M(ev, ["モルデント", "走句(第II鍵盤)"], firstLog || GLOSS.toccata(), "即興句(高声)", "D");
+    M(ev, [head.tech, "走句(第II鍵盤)"], firstLog || GLOSS.toccata(), "即興句(高声)", "D");
   }
   // T2 オクターヴ下のエコー
   {
     const f2 = stepFrom(five, -7, sH);
-    const ev = [{ off: 0, m: f2, d: 1, v: 0.92 }, { off: 1, m: stepFrom(f2, -1, sH), d: 1, v: 0.92 }, { off: 2, m: f2, d: 4, v: 0.92 }];
+    const ev = [];
+    headEv(ev, f2, 0.92, undefined);
     let r = stepFrom(f2, -1, sN);
     const rl2 = 6 + Math.floor(Math.random() * 3);
     for (let i = 0; i < rl2; i++) { ev.push({ off: 6 + i, m: r, d: 1, v: 0.88 }); r = stepFrom(r, Math.random() < 0.85 ? -1 : -2, sN); }
-    M(ev, ["エコー(鍵盤交替・第I鍵盤)"], null, "即興句(低声)", "D");
+    M(ev, ["エコー(鍵盤交替・第I鍵盤)"], st.tocHead ? GLOSS.tocVar() : null, "即興句(低声)", "D");
   }
   // T3 減七の上行分散+ペダル
   {
@@ -984,6 +1006,10 @@ const GLOSS_JA = {
     title: "トッカータ:ストゥルス・ファンタスティクス",
     body: "「触れる(toccare)」に由来する即興的楽曲。モルデント、疾走する走句、減七の分散、劇的休止とフェルマータを自由に連ねる北ドイツの幻想様式です。",
   }),
+  tocVar: () => ({
+    title: "冒頭動機の変奏",
+    body: "最初の一撃はBWV 565の原型(5̂-4̂-5̂のモルデント)を本歌取りしますが、機関が一巡するごとに頭部動機を変奏します。プラルトリラー、回音、オクターヴ上の主音、第3音からの開始——即興を旨とする幻想様式では、奏者は同じ音型を二度と同じには弾きません。",
+  }),
   dux: () => ({
     title: "フーガ開始:主唱(ドゥクス)",
     body: "単声で主題を提示。この主題は今この瞬間、この演奏のためだけに生成されたものです。以後のフーガの全素材がここから導かれます。",
@@ -1049,6 +1075,7 @@ const GLOSS_EN = {
   ostTop: () => ({ title: "Theme moves to the soprano", body: "The ostinato leaves the bass and floats to the top voice; the pedal falls silent. A dramatic turn also used in BWV 582." }),
   organum: () => ({ title: "The pipe organ and the North German style", body: "Each note is additively synthesized as a chorus of pipes (8′, 4′, quint, mixture) with speech chiff, wind unsteadiness and long stone-church reverb. The console shows Manual I (Hauptwerk), Manual II (Oberwerk) and pedals, with each voice's assignment lit." }),
   toccata: () => ({ title: "Toccata: stylus phantasticus", body: "From toccare, 'to touch' — an improvisatory genre of mordents, rushing runs, diminished-seventh arpeggios, dramatic pauses and fermatas, in the North German fantastic style." }),
+  tocVar: () => ({ title: "The opening motif, varied", body: "The first stroke quotes the archetype of BWV 565 (the 5̂–4̂–5̂ mordent), but every time the engine comes round again the head-motif is varied: an inverted mordent, a turn, the octave tonic, an entry from the third. In the fantastic style, which is improvisation by definition, no player ever plays the same figure twice." }),
   dux: () => ({ title: "Fugue begins: the subject (dux)", body: "A single voice states the subject — generated at this very moment, for this performance alone. All material of the fugue derives from it." }),
   comes: () => ({ title: "Answer (comes) + countersubject", body: "The second voice answers the subject a fifth higher (in the dominant), while the first spins the countersubject that will accompany every later entry." }),
   episode: () => ({ title: "Episode", body: "The head-motif of the subject is spun into sequences, bridging to the next entry." }),
