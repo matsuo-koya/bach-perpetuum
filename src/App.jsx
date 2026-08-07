@@ -886,7 +886,7 @@ function buildBourree(st) {
   // 開放弦の保続音(ホ短調なら第5音=ロ)。旋律と低音の間で鳴り続ける
   const pedal = nearestPcMidi(pcOf(tn + 7), 64);
   // リュートの歌う音域。はみ出したらオクターヴで折り返す(音階の所属は変わらない)
-  const loM = 62, hiM = 81;
+  const loM = 57, hiM = 74; // 第3コース開放a 〜 第1コース第9フレットd″
   const fit = (m) => { while (m > hiM) m -= 12; while (m < loM) m += 12; return m; };
   let prevTop = null;
 
@@ -906,12 +906,16 @@ function buildBourree(st) {
   plan.forEach((deg, bi) => {
     const ev = [];
     const isLast = bi === plan.length - 1;
-    // 属和音だけ和声的短音階(導音を上げてVを長三和音に)。III・VI・VIIは自然短音階のまま
-    const chS = deg === 4 ? sH : sN;
-    const bassRoot = stepFrom(nearestPcMidi(tn, bassRef), deg, chS);
-    const triad = [0, 2, 4].map((s) => stepFrom(bassRoot, s, chS)); // 当該和音の構成音
     const techs = [];
     const tenths = bi % 4 === 2 && !isLast; // 10度平行で降りる小節
+    // 属和音だけ和声的短音階(導音を上げてVを長三和音に)。III・VI・VIIは自然短音階のまま
+    const chS = deg === 4 ? sH : sN;
+    let bassRoot = stepFrom(nearestPcMidi(tn, bassRef), deg, chS);
+    // 10度平行では4分音符で3度ぶん降りるので、ディアパゾンの下限を割らない高さから始める
+    const bassFloor = tenths ? 43 : 38;
+    while (bassRoot < bassFloor) bassRoot += 12;
+    while (bassRoot > 57) bassRoot -= 12;
+    const triad = [0, 2, 4].map((s) => stepFrom(bassRoot, s, chS)); // 当該和音の構成音
 
     // --- 低音
     const bassLine = [];
@@ -1053,7 +1057,7 @@ function dlBlob(blob, name) {
   a.click();
   setTimeout(() => { URL.revokeObjectURL(u); a.remove(); }, 500);
 }
-function drawRecFrame(cv, an, act, log, organ) {
+function drawRecFrame(cv, an, act, log, organ, lute) {
   const g = cv.getContext("2d");
   g.fillStyle = "#14100b";
   g.fillRect(0, 0, 1280, 720);
@@ -1131,6 +1135,8 @@ function drawRecFrame(cv, an, act, log, organ) {
       g.fillRect(60 + i * pw, sharp ? 588 : 596, pw - 2, sharp ? 40 : 64);
     }
     g.textAlign = "center";
+  } else if (lute) {
+    drawLute(g, act, an && an.key, 40, 396, 1200, 268, true);
   } else {
     const ww = 1180 / 36;
     drawManual(50, 420, ww, 220, new Set(items.map((i) => i.m)), false);
@@ -1944,7 +1950,7 @@ export default function BachPerpetuumMobile() {
     // イベント小節(オルガンの各様式、およびリュートのブーレ)
     if (meas.events) {
       Tone.Draw.schedule(() => {
-        const an = { no: st.measureNo, keyN: keyName(meas.disp.key), romans: meas.disp.label, f: meas.disp.f, techs: meas.techs };
+        const an = { no: st.measureNo, keyN: keyName(meas.disp.key), key: meas.disp.key, romans: meas.disp.label, f: meas.disp.f, techs: meas.techs };
         analysisRef.current = an;
         setAnalysis(an);
         if (meas.log && !meas.logShown) pushLog(meas.log, st.measureNo, keyName(meas.disp.key));
@@ -1968,7 +1974,7 @@ export default function BachPerpetuumMobile() {
     const kN = keyName(meas.chords[0].key);
     const romans = meas.chords.map((c) => c.roman).join(" – ");
     Tone.Draw.schedule(() => {
-      const an = { no: st.measureNo, keyN: kN, romans, f: meas.chords[0].f, techs: meas.techs };
+      const an = { no: st.measureNo, keyN: kN, key: meas.chords[0].key, romans, f: meas.chords[0].f, techs: meas.techs };
       analysisRef.current = an;
       setAnalysis(an);
       if (meas.log && !meas.logShown) pushLog(meas.log, st.measureNo, kN);
@@ -2102,7 +2108,7 @@ export default function BachPerpetuumMobile() {
     const isOrganNow = () => isOrganMode(settingsRef.current.genMode);
     // 録画は録画専用の点灯走査:出力レイテンシ補正なし(ファイル内の音声は無遅延のため)
     const recNotes = () => latestVizNotes(vizQueueRef.current, Tone.getContext().rawContext.currentTime) || [];
-    drawRecFrame(canvas, analysisRef.current, recNotes(), latestLogRef.current, isOrganNow());
+    drawRecFrame(canvas, analysisRef.current, recNotes(), latestLogRef.current, isOrganNow(), isLuteMode(settingsRef.current.genMode));
     const stream = canvas.captureStream(); // コンポジタ駆動:表示中のcanvasは画面合成と同時にフレームが確定する
     const vTrack = stream.getVideoTracks()[0];
     recDest.stream.getAudioTracks().forEach((t) => stream.addTrack(t));
@@ -2143,7 +2149,7 @@ export default function BachPerpetuumMobile() {
     setRecState(true);
     const loop = () => {
       if (!recRef.current) return;
-      drawRecFrame(canvas, analysisRef.current, recNotes(), latestLogRef.current, isOrganNow());
+      drawRecFrame(canvas, analysisRef.current, recNotes(), latestLogRef.current, isOrganNow(), isLuteMode(settingsRef.current.genMode));
       if (vTrack && vTrack.requestFrame) vTrack.requestFrame(); // 描画のたびに現在時刻でフレームを明示発行
       recRef.current.raf = requestAnimationFrame(loop);
     };
@@ -2227,6 +2233,8 @@ export default function BachPerpetuumMobile() {
         <section style={{ ...S.panel, padding: "10px 12px 6px" }}>
           <KeyboardViz
             organ={isOrganMode(settings.genMode)}
+            lute={isLuteMode(settings.genMode)}
+            analysisRef={analysisRef}
             queueRef={vizQueueRef}
             activeRef={activeRef}
           />
@@ -2503,7 +2511,107 @@ function silentAudioEl() {
 }
 
 /* ---------- 鍵盤canvas描画(SVG/Reactを経由しない低遅延パス) ---------- */
-function drawKeysCanvas(cv, act, organ) {
+/* ---------- リュートの指板 ----------
+   11コースのバロック・リュート(ニ短調調弦)。第1〜6コースは指板上、
+   第7〜11コース(ディアパゾン)は開放専用で、調に合わせて張り替える */
+const LUTE_BOARD = [65, 62, 57, 53, 50, 45]; // f′ d′ a f d A
+const LUTE_FRETS = 9;
+/* ディアパゾンは第6コースの下に音階を降りていく(奏者は調ごとに巻き替える) */
+function luteDiapasons(key) {
+  const tn = key ? key.tonic : 2;
+  const sc = [0, 2, 3, 5, 7, 8, 10].map((x) => pcOf(x + tn));
+  const out = [];
+  let m = LUTE_BOARD[5];
+  for (let i = 0; i < 5; i++) { m = stepFrom(m, -1, sc); out.push(m); }
+  return out;
+}
+/* 押さえる場所を決める。指板上ではいちばん低いポジション(=高いコース)を取る */
+function luteStop(m, dia) {
+  let best = null;
+  LUTE_BOARD.forEach((open, i) => {
+    const fr = m - open;
+    if (fr < 0 || fr > LUTE_FRETS) return;
+    if (best === null || fr < best.fret) best = { course: i, fret: fr };
+  });
+  if (best) return best;
+  // 指板を外れる低音は開放のディアパゾン。厳密に合う弦がなければ最寄りへ
+  let bi = -1, bd = 99;
+  dia.forEach((p, i) => { const d = Math.abs(p - m); if (d < bd) { bd = d; bi = i; } });
+  return bi < 0 || bd > 2 ? null : { course: 6 + bi, fret: 0, dia: true };
+}
+/* フランス式タブラチュアの音位記号(a=開放、b=第1フレット…。jは使わない) */
+const LUTE_TAB = ["a", "b", "c", "d", "e", "f", "g", "h", "i", "k"];
+function drawLute(g, act, key, x0, y0, w, h, big) {
+  const items = (act || []).map((a) => (typeof a === "number" ? { m: a } : a));
+  const dia = luteDiapasons(key);
+  const nCourse = LUTE_BOARD.length + dia.length;
+  const top = y0 + (big ? 26 : 16); // 上端にフレット記号の行を空ける
+  const gap = (h - (big ? 30 : 20)) / (nCourse + 1);
+  const nut = x0 + w * 0.14;
+  const fw = (x0 + w - nut) / LUTE_FRETS;
+  const cy = (i) => top + gap * (i + 1);
+  const bTop = cy(0) - gap * 0.6, bBot = cy(5) + gap * 0.6;
+  // 指板(黒檀)
+  g.fillStyle = "#312417";
+  g.fillRect(nut, bTop, x0 + w - nut, bBot - bTop);
+  // 腸弦を巻いたフレット
+  g.lineWidth = big ? 1.6 : 1.1;
+  g.strokeStyle = "#634d33";
+  for (let f = 1; f <= LUTE_FRETS; f++) {
+    const fx = nut + f * fw;
+    g.beginPath(); g.moveTo(fx, bTop); g.lineTo(fx, bBot); g.stroke();
+  }
+  // ナット(象牙)
+  g.strokeStyle = "#cbbd9c";
+  g.lineWidth = big ? 4 : 2.6;
+  g.beginPath(); g.moveTo(nut, bTop); g.lineTo(nut, bBot); g.stroke();
+  // フレット記号
+  g.fillStyle = "#7a6647";
+  g.font = `italic ${big ? 15 : 11}px Georgia, serif`;
+  g.textAlign = "center";
+  for (let f = 0; f <= LUTE_FRETS; f++) {
+    const fx = f === 0 ? nut - fw * 0.28 : nut + (f - 0.5) * fw;
+    g.fillText(LUTE_TAB[f], fx, bTop - (big ? 9 : 5));
+  }
+  // 弦(複弦なので2本一組で描く)
+  g.font = `${big ? 15 : 11}px Georgia, serif`;
+  g.textAlign = "right";
+  const NM = ["C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B"];
+  for (let i = 0; i < nCourse; i++) {
+    const onBoard = i < LUTE_BOARD.length;
+    const p = onBoard ? LUTE_BOARD[i] : dia[i - LUTE_BOARD.length];
+    const y = cy(i);
+    g.strokeStyle = onBoard ? "#a08c62" : "#6f5c40";
+    g.lineWidth = big ? 1.3 : 0.9;
+    const xa = nut - fw * 0.28;
+    const xb = onBoard ? x0 + w : nut + fw * 0.5; // ディアパゾンは指板に載らない
+    [-1, 1].forEach((d) => {
+      g.beginPath();
+      g.moveTo(xa, y + d * (big ? 1.4 : 1));
+      g.lineTo(xb, y + d * (big ? 1.4 : 1));
+      g.stroke();
+    });
+    g.fillStyle = "#8a744d";
+    g.fillText(`${i + 1} ${NM[pcOf(p)]}`, xa - (big ? 10 : 6), y + (big ? 5 : 4));
+  }
+  // 鳴っている音。押さえた位置にタブラチュアの音位記号を置く
+  g.textAlign = "center";
+  items.forEach((it) => {
+    const s = luteStop(it.m, dia);
+    if (!s) return;
+    const y = cy(s.course);
+    const x = s.fret === 0 ? nut - fw * 0.28 : nut + (s.fret - 0.5) * fw;
+    g.fillStyle = "#c8a24a";
+    g.beginPath();
+    g.arc(x, y, big ? 13 : 8.5, 0, Math.PI * 2);
+    g.fill();
+    g.fillStyle = "#1a130c";
+    g.font = `italic ${big ? 17 : 11}px Georgia, serif`;
+    g.fillText(LUTE_TAB[s.fret], x, y + (big ? 6 : 4));
+  });
+}
+
+function drawKeysCanvas(cv, act, organ, lute, key) {
   const g = cv.getContext("2d");
   g.clearRect(0, 0, cv.width, cv.height);
   const wPcs = [0, 2, 4, 5, 7, 9, 11];
@@ -2543,6 +2651,8 @@ function drawKeysCanvas(cv, act, organ) {
       g.fillStyle = sp.has(m) ? "#c8a24a" : sharp ? "#241a12" : "#7a6647";
       g.fillRect(40 + i * pw, sharp ? 168 : 176, pw - 1.6, sharp ? 40 : 70);
     }
+  } else if (lute) {
+    drawLute(g, act, key, 0, 0, cv.width, cv.height, false);
   } else {
     const ww = 970 / 36;
     manual(20, 4, ww, 108, new Set(items.map((i) => i.m)), false);
@@ -2558,30 +2668,35 @@ function latestVizNotes(list, deadline) {
 }
 
 /* オーディオクロック直結の鍵盤表示:出力レイテンシも補正して耳と同期させる */
-function KeyboardViz({ organ, queueRef, activeRef }) {
+function KeyboardViz({ organ, lute, queueRef, activeRef, analysisRef }) {
   const ref = useRef(null);
   useEffect(() => {
     const cv = ref.current;
     cv.width = 1010;
-    cv.height = organ ? 252 : 118;
-    drawKeysCanvas(cv, activeRef.current, organ);
+    cv.height = organ ? 252 : lute ? 210 : 118;
+    const keyOf = () => (analysisRef && analysisRef.current ? analysisRef.current.key : null);
+    drawKeysCanvas(cv, activeRef.current, organ, lute, keyOf());
     let raf;
     let last = null;
+    let lastKey = null;
     const loop = () => {
       const ctx = Tone.getContext().rawContext;
       const lat = ctx.outputLatency || ctx.baseLatency || 0;
       // 耳に届く時刻に合わせる:スケジュール時刻tの音が聞こえるのはt+lat
       const notes = latestVizNotes(queueRef.current, ctx.currentTime - lat);
-      if (notes !== null && notes !== last) {
-        last = notes;
-        activeRef.current = notes;
-        drawKeysCanvas(cv, notes, organ);
+      const k = keyOf();
+      // 転調するとディアパゾンを張り替えるので、調が変わっても描き直す
+      const kid = k ? `${k.tonic}:${k.mode}` : "";
+      if ((notes !== null && notes !== last) || kid !== lastKey) {
+        if (notes !== null) { last = notes; activeRef.current = notes; }
+        lastKey = kid;
+        drawKeysCanvas(cv, activeRef.current, organ, lute, k);
       }
       raf = requestAnimationFrame(loop);
     };
     raf = requestAnimationFrame(loop);
     return () => cancelAnimationFrame(raf);
-  }, [organ]); // eslint-disable-line
+  }, [organ, lute]); // eslint-disable-line
   return <canvas ref={ref} style={{ width: "100%", display: "block" }} />;
 }
 
