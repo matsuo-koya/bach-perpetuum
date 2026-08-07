@@ -235,10 +235,20 @@ function nearestPcMidi(pc, ref) {
    弦:撥弦点コムフィルタ+周波数依存減衰+2弦デチューン
    響板:モード共鳴IR/室内:初期反射+拡散残響IR(畳み込み)
    ============================================================ */
+/* 弦の高域減衰。実弦の損失は「時間あたり」で効くが、ループは1周ごとに効くため、
+   固定係数だと1周の短い高音弦ばかりが急速に丸くなる。秒あたりの損失が揃うよう周波数で補正する */
+const KS_HF_LOSS = 250; // 高域(ナイキスト付近)の目標減衰 dB/s
+const ksBright = (f) => Math.min(0.95, (1 + Math.pow(10, -KS_HF_LOSS / (20 * f))) / 2);
 function ksString(out, sr, f, t60, len, seed, pluckPos) {
-  const N = sr / f - 0.5; // 平均化フィルタの0.5サンプル遅延を補正
-  const L = Math.max(4, Math.floor(N));
-  const frac = Math.max(0, N - L);
+  const b = ksBright(f);
+  const w = (2 * Math.PI * f) / sr;
+  // ループフィルタの位相遅れ(サンプル)を差し引いた残りが弦長
+  const lagLP = Math.atan2((1 - b) * Math.sin(w), b + (1 - b) * Math.cos(w)) / w;
+  const N = sr / f - lagLP;
+  const L = Math.max(4, Math.floor(N) - 1);
+  // 端数は全域通過フィルタが受け持つ。線形補間と違い振幅を減らさないので減衰はループフィルタだけで決まる
+  const d = N - L; // 1〜2サンプル(係数が安定する範囲)
+  const c = -Math.sin(((d - 1) * w) / 2) / Math.sin(((d + 1) * w) / 2); // その周波数で位相遅れが厳密にd
   let rng = seed >>> 0;
   const rand = () => {
     rng = (rng * 1664525 + 1013904223) >>> 0;
@@ -249,22 +259,27 @@ function ksString(out, sr, f, t60, len, seed, pluckPos) {
   // 撥弦点コム:ナット近くを爪で弾く鼻にかかった倍音構造
   const pp = Math.max(1, Math.round(N * pluckPos));
   for (let i = L - 1; i >= pp; i--) dl[i] -= 0.92 * dl[i - pp];
-  // 励起の軽い整形
-  for (let i = 1; i < L; i++) dl[i] = 0.72 * dl[i] + 0.28 * dl[i - 1];
-  const g = Math.pow(10, -3 / (t60 * f)); // T60から周回減衰を導出
-  let idx = 0, prev = 0;
+  // 励起の整形もループの明るさに合わせる(高音弦では鈍らせない)
+  for (let i = 1; i < L; i++) dl[i] = b * dl[i] + (1 - b) * dl[i - 1];
+  // ループフィルタが基音にも与える損失を打ち消し、指定したT60を実際に鳴らす
+  const hMag = Math.sqrt(b * b + (1 - b) * (1 - b) + 2 * b * (1 - b) * Math.cos(w));
+  const g = Math.min(0.9999, Math.pow(10, -3 / (t60 * f)) / hMag);
+  let idx = 0, prev = 0, apX = 0, apY = 0;
   for (let n = 0; n < len; n++) {
-    const s = dl[idx] * (1 - frac) + dl[(idx + 1) % L] * frac;
-    const y = g * (0.5 * s + 0.5 * prev); // 高次倍音ほど速く減衰
+    const s = dl[idx];
+    const lo = b * s + (1 - b) * prev; // 高次倍音ほど速く減衰
     prev = s;
-    dl[idx] = y;
+    const y = c * lo + apX - c * apY;
+    apX = lo;
+    apY = y;
+    dl[idx] = g * y;
     out[n] += y;
     idx = (idx + 1) % L;
   }
 }
 function renderNote(ctx, sr, f, midi) {
   // 実機同様、低音弦ほど長く鳴る
-  const t60 = midi < 46 ? 4.6 : midi < 58 ? 3.6 : midi < 70 ? 2.4 : midi < 80 ? 1.4 : 0.9;
+  const t60 = midi < 46 ? 4.6 : midi < 58 ? 3.6 : midi < 70 ? 2.4 : midi < 80 ? 1.7 : 1.15;
   const dur = Math.min(t60 + 0.4, 5.2);
   const len = Math.floor(sr * dur);
   const out = new Float32Array(len);
@@ -1171,7 +1186,7 @@ export default function BachPerpetuumMobile() {
     const body = new Tone.Convolver(makeBodyIR(ctx, sr));
     body.connect(dry);
     body.connect(room);
-    const lp = new Tone.Filter(6800, "lowpass");
+    const lp = new Tone.Filter(8500, "lowpass"); // 爪の当たりを残す
     const inGain = new Tone.Gain(1.15);
     inGain.chain(lp, body);
     // 楽器の幅:低音弦は左、高音弦は右(奏者視点)にゾーン配置
