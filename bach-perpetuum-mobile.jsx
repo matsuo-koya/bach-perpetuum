@@ -61,6 +61,9 @@ const TR_EN = {
   "主題提示(グラウンド・バス)": "Ground bass statement", "和声付け": "Harmonization", "八分音符の変奏": "Eighth-note variation",
   "十六分音符の走句": "Sixteenth-note runs", "掛留(シンコペーション)": "Syncopated suspensions", "主題の上声移行": "Theme in the soprano",
   "トゥッティ": "Tutti", "オスティナート": "Ostinato",
+  "弱起(アウフタクト)": "Upbeat (anacrusis)", "10度平行": "Parallel tenths", "保続音(開放弦)": "Open-string pedal",
+  "ドゥーブル(装飾反復)": "Double (ornamented repeat)", "平行長調へ": "To the relative major", "主調で終止": "Cadence in the tonic",
+  "(上拍)": "(upbeat)", "(上拍・後半)": "(upbeat, 2nd strain)",
   "即興句(高声)": "Improvisatory flourish (high)", "即興句(低声)": "Improvisatory flourish (low)", "走句": "Run",
   "フーガ:主唱": "Fugue: Dux", "答唱(V)": "Comes (V)", "主唱(バス)": "Dux (bass)", "主題(III度調)": "Subject (rel. major)",
   "ストレッタ/V保続": "Stretto / dominant pedal", "I(ピカルディ)": "I (Picardy)", "N6(ナポリ)": "N6 (Neapolitan)", "IV6(ドリア)": "IV6 (Dorian)",
@@ -80,12 +83,15 @@ const UI = {
     era: "時代", eraW: "ヴァイマル期(1708-17)・オルガン", eraK: "ケーテン期(1717-23)", eraL: "ライプツィヒ期(1723-50)・円熟和声",
     style: "様式", mToc: "トッカータとフーガ", mCho: "コラール前奏曲", mPas: "パッサカリア(変奏曲)",
     mAria: "アリア型(旋律+伴奏)", mPre: "プレリュード型(分散和音)", mInv: "インヴェンション型(二声対位法)",
+    mBour: "リュート組曲のブーレ(BWV 996)",
     startKey: "開始調", nextStart: "(次回始動時)", temperament: "音律", retune: "(停止して再調律)",
     tempW: "ヴェルクマイスターIII(1691)", tempE: "十二平均律", pitch: "基準音高",
     p415: "a′=415Hz(バロック・ピッチ)", p440: "a′=440Hz(現代ピッチ)",
     tempo: "テンポ", volume: "音量", air: "空気感(室内残響)",
     orgStops: "レジストレーション — ORGAN STOPS", cembStops: "レジスター(ストップ)— REGISTERS",
     st8a: "8′ 前列", st8b: "8′ 後列", st4: "4′ 上鍵盤", stLute: "リュート(バフ)",
+    lutStops: "コース(弦の張り方)— COURSES",
+    luMain: "主弦", luCourse: "複弦コース", luOct: "低音のオクターヴ弦",
     oP8: "プリンシパル8′", oO4: "オクターヴ4′", oMix: "ミクスチュア", oPed: "ペダル16′",
     comm: "楽典実況 — COMMENTARIUS", logIdle: "生成がはじまると、ここに解説が流れます",
     footer: "Soli Deo Gloria — 弦・響板・空気・和声・対位法、すべて実時間演算",
@@ -102,12 +108,15 @@ const UI = {
     era: "Era", eraW: "Weimar (1708-17) · Organ", eraK: "Köthen (1717-23)", eraL: "Leipzig (1723-50) · Mature harmony",
     style: "Style", mToc: "Toccata & Fugue", mCho: "Chorale prelude", mPas: "Passacaglia (variations)",
     mAria: "Aria (melody + accompaniment)", mPre: "Prelude (arpeggiated)", mInv: "Invention (two-part counterpoint)",
+    mBour: "Bourrée from the lute suite (BWV 996)",
     startKey: "Starting key", nextStart: " (applies next start)", temperament: "Temperament", retune: " (stop to retune)",
     tempW: "Werckmeister III (1691)", tempE: "Equal temperament", pitch: "Reference pitch",
     p415: "a′=415 Hz (Baroque pitch)", p440: "a′=440 Hz (modern)",
     tempo: "Tempo", volume: "Volume", air: "Room air (reverb)",
     orgStops: "REGISTRATION — ORGAN STOPS", cembStops: "REGISTERS",
     st8a: "8′ front", st8b: "8′ back", st4: "4′ upper", stLute: "Lute (buff)",
+    lutStops: "COURSES",
+    luMain: "Main string", luCourse: "Double course", luOct: "Octave string (bass)",
     oP8: "Principal 8′", oO4: "Octave 4′", oMix: "Mixture", oPed: "Pedal 16′",
     comm: "LIVE THEORY COMMENTARY", logIdle: "Commentary streams here once generation starts",
     footer: "Soli Deo Gloria — strings, soundboard, air, harmony & counterpoint, all computed in real time",
@@ -237,10 +246,11 @@ function nearestPcMidi(pc, ref) {
    ============================================================ */
 /* 弦の高域減衰。実弦の損失は「時間あたり」で効くが、ループは1周ごとに効くため、
    固定係数だと1周の短い高音弦ばかりが急速に丸くなる。秒あたりの損失が揃うよう周波数で補正する */
-const KS_HF_LOSS = 250; // 高域(ナイキスト付近)の目標減衰 dB/s
-const ksBright = (f) => Math.min(0.95, (1 + Math.pow(10, -KS_HF_LOSS / (20 * f))) / 2);
-function ksString(out, sr, f, t60, len, seed, pluckPos) {
-  const b = ksBright(f);
+const KS_HF_LOSS = 250; // 高域(ナイキスト付近)の目標減衰 dB/s。金属弦(チェンバロ)
+const KS_HF_LOSS_GUT = 900; // ガット弦(リュート)は高域が早く失われ、指の腹で弾くぶんさらに丸い
+const ksBright = (f, hfLoss) => Math.min(0.95, (1 + Math.pow(10, -hfLoss / (20 * f))) / 2);
+function ksString(out, sr, f, t60, len, seed, pluckPos, hfLoss = KS_HF_LOSS) {
+  const b = ksBright(f, hfLoss);
   const w = (2 * Math.PI * f) / sr;
   // ループフィルタの位相遅れ(サンプル)を差し引いた残りが弦長
   const lagLP = Math.atan2((1 - b) * Math.sin(w), b + (1 - b) * Math.cos(w)) / w;
@@ -277,22 +287,41 @@ function ksString(out, sr, f, t60, len, seed, pluckPos) {
     idx = (idx + 1) % L;
   }
 }
-function renderNote(ctx, sr, f, midi) {
-  // 実機同様、低音弦ほど長く鳴る
-  const t60 = midi < 46 ? 4.6 : midi < 58 ? 3.6 : midi < 70 ? 2.4 : midi < 80 ? 1.7 : 1.15;
+function renderNote(ctx, sr, f, midi, inst = "cembalo") {
+  const isLute = inst === "lute";
+  // 実機同様、低音弦ほど長く鳴る。ガット弦は金属弦より総じて短い
+  const t60 = isLute
+    ? midi < 46 ? 3.0 : midi < 58 ? 2.4 : midi < 70 ? 1.7 : midi < 80 ? 1.2 : 0.85
+    : midi < 46 ? 4.6 : midi < 58 ? 3.6 : midi < 70 ? 2.4 : midi < 80 ? 1.7 : 1.15;
   const dur = Math.min(t60 + 0.4, 5.2);
   const len = Math.floor(sr * dur);
   const out = new Float32Array(len);
-  const pp = 0.055 + ((midi * 7) % 10) * 0.004;
-  ksString(out, sr, f * Math.pow(2, -1.4 / 1200), t60, len, 1234 + midi * 7919, pp);
-  ksString(out, sr, f * Math.pow(2, 1.8 / 1200), t60 * 0.9, len, 913 + midi * 104729, pp * 1.15);
-  // 爪(プレクトラム)が弦を離れる瞬間のクリック
-  let pr = 0;
-  const cl = Math.floor(sr * 0.005);
-  for (let i = 0; i < cl; i++) {
-    const r = Math.random() * 2 - 1;
-    out[i] += (r - pr) * Math.exp(-i / (sr * 0.0009)) * 0.5;
-    pr = r;
+  const hf = isLute ? KS_HF_LOSS_GUT : KS_HF_LOSS;
+  // 爪はナット寄り、指はより中央寄りを弾く。撥弦点が中央に寄るほど倍音が減って丸くなる
+  const pp = isLute ? 0.15 + ((midi * 7) % 10) * 0.006 : 0.055 + ((midi * 7) % 10) * 0.004;
+  // リュートは複弦(コース)。同度2本の張りの差はチェンバロの2弦より大きい
+  const det = isLute ? [-3.2, 4.1] : [-1.4, 1.8];
+  ksString(out, sr, f * Math.pow(2, det[0] / 1200), t60, len, 1234 + midi * 7919, pp, hf);
+  ksString(out, sr, f * Math.pow(2, det[1] / 1200), t60 * 0.9, len, 913 + midi * 104729, pp * 1.15, hf);
+  if (isLute) {
+    // 指の腹が弦を離れる音。爪のクリックより鈍く、長い
+    let pr = 0, lo = 0;
+    const cl = Math.floor(sr * 0.012);
+    for (let i = 0; i < cl; i++) {
+      const r = Math.random() * 2 - 1;
+      lo += 0.22 * (r - lo);
+      out[i] += (lo - pr) * Math.exp(-i / (sr * 0.003)) * 0.35;
+      pr = lo;
+    }
+  } else {
+    // 爪(プレクトラム)が弦を離れる瞬間のクリック
+    let pr = 0;
+    const cl = Math.floor(sr * 0.005);
+    for (let i = 0; i < cl; i++) {
+      const r = Math.random() * 2 - 1;
+      out[i] += (r - pr) * Math.exp(-i / (sr * 0.0009)) * 0.5;
+      pr = r;
+    }
   }
   let peak = 1e-6;
   for (let i = 0; i < len; i++) { const a = Math.abs(out[i]); if (a > peak) peak = a; }
@@ -302,15 +331,19 @@ function renderNote(ctx, sr, f, midi) {
   buf.copyToChannel(out, 0);
   return buf;
 }
-function makeBodyIR(ctx, sr) {
+function makeBodyIR(ctx, sr, inst = "cembalo") {
   // 響板と箱の木質共鳴(ダイレクト成分+モード)
-  const dur = 0.14, len = Math.floor(sr * dur);
+  const isLute = inst === "lute";
+  const dur = isLute ? 0.11 : 0.14, len = Math.floor(sr * dur);
   const buf = ctx.createBuffer(1, len, sr);
   const d = buf.getChannelData(0);
   d[0] = 1;
-  const modes = [[168, 0.05], [219, 0.045], [317, 0.035], [451, 0.028], [694, 0.02]];
+  // リュートは丸い胴と響孔(ローズ)による低いヘルムホルツ共鳴が強い
+  const modes = isLute
+    ? [[118, 0.085], [212, 0.055], [331, 0.032], [486, 0.018], [702, 0.01]]
+    : [[168, 0.05], [219, 0.045], [317, 0.035], [451, 0.028], [694, 0.02]];
   modes.forEach(([f, a], mi) => {
-    const dec = 0.028 + mi * 0.004;
+    const dec = (isLute ? 0.034 : 0.028) + mi * 0.004;
     for (let i = 0; i < len; i++) {
       const t = i / sr;
       d[i] += a * Math.sin(2 * Math.PI * f * t + mi) * Math.exp(-t / dec);
@@ -381,6 +414,11 @@ function chromPhrase(k) {
     { chords: [mk(k, "iv6"), mk(k, "V")], techs: ["フリギア終止"] },
   ];
 }
+
+/* 様式ごとの楽器。オルガン / チェンバロ / リュートの3系統 */
+const ORGAN_MODES = ["toccata", "chorale", "passacaglia"];
+const isOrganMode = (gm) => ORGAN_MODES.includes(gm);
+const isLuteMode = (gm) => gm === "bourree";
 
 /* ============================================================
    トッカータとフーガ(ヴァイマル期・オルガン)生成器
@@ -808,6 +846,166 @@ function buildPassacaglia(st) {
 }
 
 /* ============================================================
+   リュート組曲のブーレ生成器 — BWV 996(ホ短調)の楽想を種とする
+   2/2・弱起・二部形式(AABB)。旋律と低音を10度平行で動かし、その間に
+   開放弦の保続音を挟む書法。マッカートニーがBlackbirdの序奏に持ち込んだのはこの手触り
+   ============================================================ */
+/* ブーレのリズム細胞(16分単位・合計8=2分音符ひとつ分) */
+const BOU_CELLS = [
+  [4, 4], [4, 2, 2], [2, 2, 4], [2, 2, 2, 2], [6, 2], [4, 4],
+];
+/* 各段の和音根音を音階度で。A段は平行長調(III)へ、B段は主調へ帰る */
+const BOU_A = [0, 3, 4, 0, 2, 5, 6, 2];
+const BOU_B = [2, 6, 2, 5, 0, 3, 4, 0, 3, 4, 4, 0];
+function buildBourree(st) {
+  if (st.key.mode === "major") st.key = { tonic: pcOf(st.key.tonic + 9), mode: "minor" };
+  st.bouSec = st.bouSec || 0; // 0:A 1:A' 2:B 3:B'
+  const k = st.key, tn = k.tonic;
+  const sH = [0, 2, 3, 5, 7, 8, 11].map((x) => pcOf(x + tn)); // 和声的短音階
+  const sN = [0, 2, 3, 5, 7, 8, 10].map((x) => pcOf(x + tn));
+  const ms = [];
+  const M = (events, techs, log, label, f) =>
+    ms.push({ events, techs: techs || [], log: log || null, disp: { label, f: f || "T", key: { ...k } } });
+
+  if (st.endRequested && !st.finalMade) {
+    st.finalMade = true;
+    const ev = [{ off: 0, m: nearestPcMidi(tn, 40), d: 16, v: 0.95 }];
+    [[7, 52], [0, 59], [4, 64], [7, 67], [0, 72]].forEach(([p, r]) =>
+      ev.push({ off: 0, m: nearestPcMidi(pcOf(p + tn), r), d: 16, v: 0.72 })
+    );
+    ms.push({ events: ev, techs: ["ピカルディの3度", "終止"], log: GLOSS.picardy(), disp: { label: "I(ピカルディ)", f: "T", key: { ...k } }, finalOrgan: true });
+    st.queue.push(...ms);
+    return;
+  }
+
+  const sec = st.bouSec % 4;
+  const plan = sec < 2 ? BOU_A : BOU_B;
+  const isRepeat = sec === 1 || sec === 3; // 反復はドゥーブル(装飾変奏)で返す
+  const scale = sN;
+  const topRef = 76, bassRef = 45;
+  // 開放弦の保続音(ホ短調なら第5音=ロ)。旋律と低音の間で鳴り続ける
+  const pedal = nearestPcMidi(pcOf(tn + 7), 64);
+  // リュートの歌う音域。はみ出したらオクターヴで折り返す(音階の所属は変わらない)
+  const loM = 62, hiM = 81;
+  const fit = (m) => { while (m > hiM) m -= 12; while (m < loM) m += 12; return m; };
+  let prevTop = null;
+
+  // 弱起:段のはじめに4単位の上拍を置く
+  if (sec === 0 || sec === 2) {
+    const up = fit(stepFrom(nearestPcMidi(tn, topRef), sec === 0 ? 4 : 2, scale));
+    prevTop = up;
+    M(
+      [{ off: 12, m: up, d: 4, v: 0.82 }],
+      ["弱起(アウフタクト)"],
+      st.bouSec === 0 ? GLOSS.bourree() : null,
+      sec === 0 ? "(上拍)" : "(上拍・後半)",
+      "D"
+    );
+  }
+
+  plan.forEach((deg, bi) => {
+    const ev = [];
+    const isLast = bi === plan.length - 1;
+    // 属和音だけ和声的短音階(導音を上げてVを長三和音に)。III・VI・VIIは自然短音階のまま
+    const chS = deg === 4 ? sH : sN;
+    const bassRoot = stepFrom(nearestPcMidi(tn, bassRef), deg, chS);
+    const triad = [0, 2, 4].map((s) => stepFrom(bassRoot, s, chS)); // 当該和音の構成音
+    const techs = [];
+    const tenths = bi % 4 === 2 && !isLast; // 10度平行で降りる小節
+
+    // --- 低音
+    const bassLine = [];
+    if (isLast) {
+      bassLine.push([0, bassRoot, 16]);
+    } else if (tenths) {
+      let b = bassRoot;
+      for (let q = 0; q < 4; q++) { bassLine.push([q * 4, b, 4]); b = stepFrom(b, -1, sN); }
+    } else {
+      // 次の根音へ順次で橋渡し(歩く低音)
+      const nextRoot = stepFrom(nearestPcMidi(tn, bassRef), plan[(bi + 1) % plan.length], sN);
+      const mid = stepFrom(bassRoot, nextRoot > bassRoot ? 1 : -1, sN);
+      bassLine.push([0, bassRoot, 8], [8, mid, 8]);
+    }
+    bassLine.forEach(([o, m, d], i) => ev.push({ off: o, m, d, v: i ? 0.78 : 0.86 }));
+
+    // --- 旋律
+    let cur = prevTop == null ? fit(nearestPcMidi(pcOf(triad[2]), topRef)) : prevTop;
+    if (tenths) {
+      // 低音の各音の10度上(オクターヴ+3度=音階で9度)を保って並行下行
+      // 折り返しは4音まとめて決める。同じオクターヴ差で降ろさないと平行が崩れる
+      const raw = bassLine.map(([, bm]) => stepFrom(bm, 9, sN));
+      let shift = 0;
+      while (Math.min(...raw) + shift < loM) shift += 12;
+      while (Math.max(...raw) + shift > hiM) shift -= 12;
+      bassLine.forEach(([o], i) => {
+        const m = raw[i] + shift;
+        ev.push({ off: o, m, d: 4, v: 0.84 });
+        cur = m;
+      });
+    } else {
+      let off = 0;
+      let dir = Math.random() < 0.5 ? 1 : -1;
+      for (let h = 0; h < 2; h++) {
+        const cell = BOU_CELLS[Math.floor(Math.random() * BOU_CELLS.length)];
+        cell.forEach((d, ci) => {
+          let m;
+          if (ci === 0) {
+            // 拍頭は和声音。いまの位置から近いものを、動きのあるほうへ選ぶ
+            const cand = triad
+              .map((t) => nearestPcMidi(pcOf(t), cur))
+              .filter((x) => x !== cur && Math.abs(x - cur) <= 7);
+            m = cand.length ? cand[Math.floor(Math.random() * cand.length)] : stepFrom(cur, dir, chS);
+          } else {
+            // 経過音・刺繍音。音階はその小節の和音に従う(III・VIの小節に導音を混ぜない)
+            const step = Math.random() < 0.78 ? 1 : 2;
+            m = stepFrom(cur, dir * step, chS);
+          }
+          if (m > hiM) dir = -1;
+          if (m < loM) dir = 1;
+          m = fit(m);
+          if (Math.random() < 0.22) dir = -dir;
+          // 段の締めくくりは和声音に置く
+          if (isLast && off + d >= 16) m = fit(nearestPcMidi(pcOf(triad[Math.random() < 0.6 ? 0 : 2]), cur));
+          // ドゥーブル:反復時は4分音符を8分に割って装飾する
+          if (isRepeat && d >= 4 && Math.random() < 0.6) {
+            const orn = fit(stepFrom(m, 1, chS));
+            ev.push({ off, m, d: d / 2, v: 0.8 });
+            ev.push({ off: off + d / 2, m: orn, d: d / 2, v: 0.72 });
+          } else {
+            ev.push({ off, m, d, v: 0.84 });
+          }
+          cur = m;
+          off += d;
+        });
+      }
+    }
+    prevTop = cur;
+
+    // --- 保続音:開放弦を8分の裏で打つ(A段の前半とB段の終盤)
+    const usePedal = (sec < 2 && bi < 4) || (sec >= 2 && bi >= plan.length - 4);
+    if (usePedal) {
+      for (let i = 1; i < 8; i += 2) ev.push({ off: i * 2, m: pedal, d: 2, v: 0.5 });
+      techs.push("保続音(開放弦)");
+    }
+    if (tenths) techs.push("10度平行");
+    if (isRepeat) techs.push("ドゥーブル(装飾反復)");
+    if (isLast) techs.push(sec < 2 ? "平行長調へ" : "主調で終止");
+
+    const F = deg === 0 || deg === 5 ? "T" : deg === 4 || deg === 6 ? "D" : "S";
+    const ROM = ["i", "ii°", "III", "iv", "V", "VI", "VII"];
+    M(ev, techs, bi === 0 && sec === 2 && st.bouSec === 2 ? GLOSS.bourreeB() : null, ROM[deg], F);
+  });
+
+  st.bouSec++;
+  // AABB を終えたら調をめぐって続ける
+  if (st.bouSec % 4 === 0) {
+    st.key = { tonic: pcOf(tn + (Math.random() < 0.5 ? 7 : 5)), mode: "minor" };
+    if (ms.length) ms[ms.length - 1].log2 = GLOSS.modReturn();
+  }
+  st.queue.push(...ms);
+}
+
+/* ============================================================
    MIDI書き出し(SMF format 1)/録画フレーム描画/ダウンロード
    ============================================================ */
 function exportMidi(events) {
@@ -1053,6 +1251,18 @@ const GLOSS_JA = {
     title: "アリア(カンタービレ)様式",
     body: "旋律・内声・通奏低音の三層書法。旋律は強拍で和声音を取り、弱拍を経過音・刺繍音・前打音(アポジャトゥーラ)などの非和声音で満たして歌います。「G線上のアリア」に代表される織り方です。",
   }),
+  bourree: () => ({
+    title: "リュート組曲のブーレ",
+    body: "ホ短調リュート組曲BWV 996のブーレを種にした2分の2拍子・弱起の舞曲。旋律と低音が10度平行で降り、その間で開放弦の保続音が鳴りつづけます。少年のマッカートニーとハリスンがギターで覚えたのがこの曲で、Blackbirdの序奏はここから来た手触りです。",
+  }),
+  bourreeB: () => ({
+    title: "後半(B段)へ",
+    body: "二部形式の後半。平行長調から出発し、近親調をめぐって主調へ帰ります。前半・後半ともに反復し、反復ではドゥーブル(装飾変奏)として4分音符を8分に割って飾ります。",
+  }),
+  lute: () => ({
+    title: "リュートの音源",
+    body: "ガット弦は金属弦より高域が早く失われ、指の腹で弦の中央寄りを弾くため倍音が減ります。同度2本を張った複弦(コース)のわずかな張力差がうねりを生み、丸い胴と響孔(ローズ)の低いヘルムホルツ共鳴が全体を包みます。",
+  }),
   imitation: (s) => ({
     title: `主題提示と模倣:${s}`,
     body: "上声が単独で主題(ズビェクト)を提示した後、下声が同じ主題をオクターヴ下で追いかけます。インヴェンションの開始定型です。",
@@ -1098,6 +1308,9 @@ const GLOSS_EN = {
   stretto: () => ({ title: "Stretto", body: "The next voice begins the subject before the previous one has finished — the overlapping chase that drives the tension to its peak." }),
   modReturn: () => ({ title: "Restarting in a new key", body: "After the cadence, the engine moves to the dominant and keeps turning." }),
   aria: () => ({ title: "Aria (cantabile) style", body: "Three layers — melody, inner voices, continuo. The melody takes chord tones on strong beats and fills weak beats with passing tones, neighbors and appoggiaturas, in the manner of the Air on the G string." }),
+  bourree: () => ({ title: "Bourrée from the lute suite", body: "A cut-time dance with an upbeat, seeded from the Bourrée of the E minor lute suite BWV 996. Melody and bass descend in parallel tenths while an open-string pedal tone rings between them. This is the piece the teenage McCartney and Harrison learned on guitar — the feel the intro of Blackbird came from." }),
+  bourreeB: () => ({ title: "Into the second strain", body: "The B section of the binary form: it sets out from the relative major and travels the near keys back to the tonic. Both strains repeat, and on the repeat they return as a double — quarter notes split into eighths and ornamented." }),
+  lute: () => ({ title: "The lute voice", body: "Gut strings lose their highs faster than metal, and the flesh of the finger plucks nearer the middle of the string, thinning the upper partials. Courses of two unison strings beat gently against each other, and the low Helmholtz resonance of the round body and its rose wraps the whole." }),
   imitation: (s) => ({ title: `Subject and imitation: ${tr(s)}`, body: "The upper voice states the subject alone; the lower voice then follows an octave below. The standard opening of an invention." }),
   invert: () => ({ title: "Invertible counterpoint", body: "The voices are written so they still work when exchanged: the subject moves to the bass, the counter-melody to the top." }),
   trill: () => ({ title: "Cadential trill", body: "A rapid alternation of leading tone and tonic over the dominant. A Baroque trill begins, as a rule, from the upper auxiliary." }),
@@ -1186,9 +1399,19 @@ export default function BachPerpetuumMobile() {
     const body = new Tone.Convolver(makeBodyIR(ctx, sr));
     body.connect(dry);
     body.connect(room);
+    // リュートの胴。2つの筐体を並列に置き、ゲインで持ち替える(再接続の切れ目を作らない)
+    const bodyL = new Tone.Convolver(makeBodyIR(ctx, sr, "lute"));
+    bodyL.connect(dry);
+    bodyL.connect(room);
+    const bodyCG = new Tone.Gain(1);
+    const bodyLG = new Tone.Gain(0);
+    bodyCG.connect(body);
+    bodyLG.connect(bodyL);
     const lp = new Tone.Filter(8500, "lowpass"); // 爪の当たりを残す
     const inGain = new Tone.Gain(1.15);
-    inGain.chain(lp, body);
+    lp.connect(bodyCG);
+    lp.connect(bodyLG);
+    inGain.connect(lp);
     // 楽器の幅:低音弦は左、高音弦は右(奏者視点)にゾーン配置
     const zones = [];
     for (let i = 0; i < 9; i++) {
@@ -1210,21 +1433,25 @@ export default function BachPerpetuumMobile() {
     windLfo.start();
     const orgIn = ctx.createGain();
     Tone.connect(orgIn, wind);
-    audioRef.current = { zones, lp, roomGain, vol, cathGain, orgIn, master, buffers: null, cacheKey: "" };
+    audioRef.current = { zones, lp, bodyCG, bodyLG, roomGain, vol, cathGain, orgIn, master, buffers: null, cacheKey: "" };
     return audioRef.current;
   }, []);
 
   const buildBuffers = useCallback(async () => {
     const a = ensureAudio();
     const s = settingsRef.current;
-    const ck = `${s.tempId}:${s.aFreq}`;
+    const inst = isLuteMode(s.genMode) ? "lute" : "cembalo";
+    const ck = `${s.tempId}:${s.aFreq}:${inst}`;
+    // 胴の持ち替えは弦のレンダリングを待たずに済ませる
+    a.bodyCG.gain.rampTo(inst === "lute" ? 0 : 1, 0.05);
+    a.bodyLG.gain.rampTo(inst === "lute" ? 1 : 0, 0.05);
     if (a.cacheKey === ck && a.buffers) return;
     setTuning(0);
     const ctx = Tone.getContext().rawContext;
     const sr = ctx.sampleRate;
     const map = new Map();
     for (let m = 30; m <= 94; m++) {
-      map.set(m, renderNote(ctx, sr, midiToFreq(m, s.tempId, s.aFreq), m));
+      map.set(m, renderNote(ctx, sr, midiToFreq(m, s.tempId, s.aFreq), m, inst));
       if ((m - 30) % 6 === 5) {
         setTuning((m - 30) / 64);
         await new Promise((r) => setTimeout(r, 0));
@@ -1238,7 +1465,7 @@ export default function BachPerpetuumMobile() {
   const applyLute = useCallback((on) => {
     const a = audioRef.current;
     if (!a) return;
-    a.lp.frequency.rampTo(on ? 2400 : 6800, 0.08);
+    a.lp.frequency.rampTo(on ? 2400 : 8500, 0.08);
   }, []);
 
   const midiCap = (m, d, t, v, ch) => {
@@ -1251,6 +1478,7 @@ export default function BachPerpetuumMobile() {
     if (!a || !a.buffers) return;
     const s = settingsRef.current;
     midiCap(midi, dur, time, vel, 0);
+    const onLute = isLuteMode(s.genMode);
     const play = (m, rate, g) => {
       const buf = a.buffers.get(m);
       if (!buf) return;
@@ -1263,14 +1491,16 @@ export default function BachPerpetuumMobile() {
       const zi = Math.max(0, Math.min(8, Math.floor((m - 33) / 7)));
       gn.connect(a.zones[zi]);
       const t = Math.max(time + (Math.random() - 0.5) * 0.005, Tone.now()); // 微小な人間的ゆらぎ
-      const stopAt = t + (s.lute ? Math.min(dur, 0.2) : Math.max(dur * 1.1, 0.38));
+      // リュートにダンパーはない。指で止めるまで鳴り続ける
+      const stopAt = t + (s.lute ? Math.min(dur, 0.2) : onLute ? Math.max(dur * 1.6, 0.9) : Math.max(dur * 1.1, 0.38));
       src.start(t);
       src.stop(stopAt);
       src.onended = () => { try { src.dispose(); gn.dispose(); } catch (e) {} };
     };
     if (s.stop8a) play(midi, 1, vel * 0.95);
-    if (s.stop8b) play(midi, 1.00185, vel * 0.5); // 後列8′は僅かに異なる速度=うなり
-    if (s.stop4) play(midi + 12, 1, vel * 0.32);
+    if (s.stop8b) play(midi, 1.00185, vel * (onLute ? 0.62 : 0.5)); // 後列8′/複弦は僅かに異なる速度=うなり
+    // リュートのオクターヴ弦は低音コースだけに張る
+    if (s.stop4 && (!onLute || midi < 55)) play(midi + 12, 1, vel * (onLute ? 0.26 : 0.32));
   }, []);
 
   /* ---------- パイプオルガン:倍音加算合成 ---------- */
@@ -1350,6 +1580,7 @@ export default function BachPerpetuumMobile() {
     if (gm === "toccata") { buildToccataFugue(st); return; }
     if (gm === "chorale") { buildChorale(st); return; }
     if (gm === "passacaglia") { buildPassacaglia(st); return; }
+    if (gm === "bourree") { buildBourree(st); return; }
     const k = st.key;
     const isMaj = k.mode === "major";
     const era = settingsRef.current.era;
@@ -1710,17 +1941,21 @@ export default function BachPerpetuumMobile() {
       Tone.Transport.bpm.rampTo(cur * 0.72, measureSec * 3.2);
     }
 
-    // イベント小節(トッカータ&フーガ:オルガン)
+    // イベント小節(オルガンの各様式、およびリュートのブーレ)
     if (meas.events) {
       Tone.Draw.schedule(() => {
         const an = { no: st.measureNo, keyN: keyName(meas.disp.key), romans: meas.disp.label, f: meas.disp.f, techs: meas.techs };
         analysisRef.current = an;
         setAnalysis(an);
         if (meas.log && !meas.logShown) pushLog(meas.log, st.measureNo, keyName(meas.disp.key));
+        if (meas.log2 && !meas.log2Shown) pushLog(meas.log2, st.measureNo, keyName(meas.disp.key));
       }, time);
+      const onLute = isLuteMode(settingsRef.current.genMode);
       const tickMap = {};
       meas.events.forEach((ev) => {
-        organTrigger(ev.m, Math.max(ev.d, 1) * six * 0.98, time + ev.off * six, ev.v ?? 0.8, !!ev.ped);
+        const dur = Math.max(ev.d, 1) * six * 0.98;
+        if (onLute) trigger(ev.m, dur, time + ev.off * six, ev.v ?? 0.8);
+        else organTrigger(ev.m, dur, time + ev.off * six, ev.v ?? 0.8, !!ev.ped);
         tickMap[ev.off] = [...(tickMap[ev.off] || []), { m: ev.m, man: ev.ped ? 0 : ev.man ?? 1 }];
       });
       Object.keys(tickMap).forEach((kk) => drawTick(tickMap[kk], time + kk * six));
@@ -1809,10 +2044,11 @@ export default function BachPerpetuumMobile() {
     setEnding(false);
     midiRef.current = [];
     baseRef.current = Tone.now() + 0.1;
-    const isOrgan = ["toccata", "chorale", "passacaglia"].includes(settingsRef.current.genMode);
+    const isOrgan = isOrganMode(settingsRef.current.genMode);
     pushLog(GLOSS.tuning415(), 0, keyName(stRef.current.key));
     if (settingsRef.current.genMode === "aria") pushLog(GLOSS.aria(), 0, keyName(stRef.current.key));
     if (isOrgan) pushLog(GLOSS.organum(), 0, keyName(stRef.current.key));
+    if (isLuteMode(settingsRef.current.genMode)) pushLog(GLOSS.lute(), 0, keyName(stRef.current.key));
     Tone.Transport.timeSignature = 4;
     Tone.Transport.bpm.value = settingsRef.current.bpm;
     repeatIdRef.current = Tone.Transport.scheduleRepeat(onMeasure, "1m", 0);
@@ -1837,7 +2073,7 @@ export default function BachPerpetuumMobile() {
   const requestEnd = () => {
     if (stRef.current) {
       stRef.current.endRequested = true;
-      if (["toccata", "chorale", "passacaglia"].includes(settingsRef.current.genMode)) stRef.current.queue = [];
+      if (isOrganMode(settingsRef.current.genMode)) stRef.current.queue = [];
       setEnding(true);
     }
   };
@@ -1863,10 +2099,10 @@ export default function BachPerpetuumMobile() {
       pushLog(isJa() ? { title: "録画未対応", body: "このブラウザはcanvas.captureStreamに対応していません。" } : { title: "Recording unsupported", body: "This browser does not support canvas.captureStream." }, 0, "—");
       return;
     }
-    const isOrganMode = () => ["toccata", "chorale", "passacaglia"].includes(settingsRef.current.genMode);
+    const isOrganNow = () => isOrganMode(settingsRef.current.genMode);
     // 録画は録画専用の点灯走査:出力レイテンシ補正なし(ファイル内の音声は無遅延のため)
     const recNotes = () => latestVizNotes(vizQueueRef.current, Tone.getContext().rawContext.currentTime) || [];
-    drawRecFrame(canvas, analysisRef.current, recNotes(), latestLogRef.current, isOrganMode());
+    drawRecFrame(canvas, analysisRef.current, recNotes(), latestLogRef.current, isOrganNow());
     const stream = canvas.captureStream(); // コンポジタ駆動:表示中のcanvasは画面合成と同時にフレームが確定する
     const vTrack = stream.getVideoTracks()[0];
     recDest.stream.getAudioTracks().forEach((t) => stream.addTrack(t));
@@ -1907,7 +2143,7 @@ export default function BachPerpetuumMobile() {
     setRecState(true);
     const loop = () => {
       if (!recRef.current) return;
-      drawRecFrame(canvas, analysisRef.current, recNotes(), latestLogRef.current, isOrganMode());
+      drawRecFrame(canvas, analysisRef.current, recNotes(), latestLogRef.current, isOrganNow());
       if (vTrack && vTrack.requestFrame) vTrack.requestFrame(); // 描画のたびに現在時刻でフレームを明示発行
       recRef.current.raf = requestAnimationFrame(loop);
     };
@@ -1990,7 +2226,7 @@ export default function BachPerpetuumMobile() {
         {/* 鍵盤 */}
         <section style={{ ...S.panel, padding: "10px 12px 6px" }}>
           <KeyboardViz
-            organ={["toccata", "chorale", "passacaglia"].includes(settings.genMode)}
+            organ={isOrganMode(settings.genMode)}
             queueRef={vizQueueRef}
             activeRef={activeRef}
           />
@@ -2073,11 +2309,11 @@ export default function BachPerpetuumMobile() {
                 value={settings.era}
                 onChange={(e) => {
                   const v = e.target.value;
-                  const wasOrgan = ["toccata", "chorale", "passacaglia"].includes(settings.genMode);
+                  const wasOrgan = isOrganMode(settings.genMode);
                   const gm = v === "weimar" ? (wasOrgan ? settings.genMode : "toccata") : wasOrgan ? "aria" : settings.genMode;
                   setS({ era: v, genMode: gm });
                   if (stRef.current) stRef.current.queue = [];
-                  if (["toccata", "chorale", "passacaglia"].includes(gm) && playing && stRef.current) pushLog(GLOSS.organum(), stRef.current.measureNo, keyName(stRef.current.key));
+                  if (isOrganMode(gm) && playing && stRef.current) pushLog(GLOSS.organum(), stRef.current.measureNo, keyName(stRef.current.key));
                 }}
               >
                 <option value="weimar">{tUI("eraW")}</option>
@@ -2092,9 +2328,15 @@ export default function BachPerpetuumMobile() {
                 value={settings.genMode}
                 onChange={(e) => {
                   const v = e.target.value;
+                  const swapInst = isLuteMode(v) !== isLuteMode(settings.genMode);
                   setS({ genMode: v });
                   if (stRef.current) stRef.current.queue = [];
                   if (v === "aria" && playing && stRef.current) pushLog(GLOSS.aria(), stRef.current.measureNo, keyName(stRef.current.key));
+                  // チェンバロ↔リュートは弦そのものが違うので張り替える
+                  if (swapInst && playing) {
+                    buildBuffers();
+                    if (stRef.current) pushLog(isLuteMode(v) ? GLOSS.lute() : GLOSS.tuning415(), stRef.current.measureNo, keyName(stRef.current.key));
+                  }
                 }}
               >
                 {settings.era === "weimar" ? (
@@ -2108,6 +2350,7 @@ export default function BachPerpetuumMobile() {
                     <option value="aria">{tUI("mAria")}</option>
                     <option value="prelude">{tUI("mPre")}</option>
                     <option value="invention">{tUI("mInv")}</option>
+                    <option value="bourree">{tUI("mBour")}</option>
                   </>
                 )}
               </select>
@@ -2178,14 +2421,20 @@ export default function BachPerpetuumMobile() {
             </label>
           </div>
 
-          <div style={S.panelLabel}>{["toccata", "chorale", "passacaglia"].includes(settings.genMode) ? tUI("orgStops") : tUI("cembStops")}</div>
+          <div style={S.panelLabel}>{isOrganMode(settings.genMode) ? tUI("orgStops") : isLuteMode(settings.genMode) ? tUI("lutStops") : tUI("cembStops")}</div>
           <div style={S.stopRow}>
-            {(["toccata", "chorale", "passacaglia"].includes(settings.genMode)
+            {(isOrganMode(settings.genMode)
               ? [
                   ["orgP8", tUI("oP8")],
                   ["orgO4", tUI("oO4")],
                   ["orgMix", tUI("oMix")],
                   ["orgPed", tUI("oPed")],
+                ]
+              : isLuteMode(settings.genMode)
+              ? [
+                  ["stop8a", tUI("luMain")],
+                  ["stop8b", tUI("luCourse")],
+                  ["stop4", tUI("luOct")],
                 ]
               : [
                   ["stop8a", tUI("st8a")],
